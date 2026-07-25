@@ -228,106 +228,74 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 		return this.transientMemory;
 	}
 
-	@Override
-	public @NotNull RenderPassBackend createRenderPass(final RenderPassDescriptor descriptor) {
+    @Override
+    public @NotNull RenderPassBackend createRenderPass(final RenderPassDescriptor descriptor) {
+        try(MemoryStack memoryStack = MemoryStack.stackPush()) {
+            List<RenderPassDescriptor.Attachment<@NotNull Optional<Vector4fc>>> colorAttachments = descriptor.colorAttachments();
+            RenderPassDescriptor.Attachment<@NotNull OptionalDouble> depthAttachment = descriptor.depthAttachment();
+            int colorCount = colorAttachments.size();
 
-		List<RenderPassDescriptor.Attachment<@NotNull Optional<Vector4fc>>> colorAttachments = descriptor.colorAttachments();
-		Vk11GpuTextureView[] colorTextures = new Vk11GpuTextureView[colorAttachments.size()];
+            boolean hasDepth = depthAttachment != null;
+            Vk11GpuTextureView[] attachmentViews = new Vk11GpuTextureView[colorCount + (hasDepth ? 1 : 0)];
 
-        MemoryStack transStack = MemoryStack.stackGet();
-		for (int i = 0; i < colorAttachments.size(); i++) {
-			RenderPassDescriptor.Attachment<@NotNull Optional<Vector4fc>> attachment = colorAttachments.get(i);
-            if(attachment == null) {
-                colorTextures[i] = null;
-                continue;
+            VkClearValue.Buffer clearValues = VkClearValue.calloc(attachmentViews.length, memoryStack);
+            int[] colorFormats = new int[colorCount];
+            int depthFormat = VK10.VK_FORMAT_UNDEFINED;
+
+            for (int i = 0; i < colorCount; i++) {
+                RenderPassDescriptor.Attachment<@NotNull Optional<Vector4fc>> attachment = colorAttachments.get(i);
+                if(attachment == null) {
+                    attachmentViews[i] = null;
+                    colorFormats[i] = VK10.VK_FORMAT_UNDEFINED;
+                    continue;
+                }
+                Vk11GpuTextureView textureView = (Vk11GpuTextureView)attachment.textureView();
+                textureView.disableTransferMode(memoryStack, currentCommandBuffer);
+                attachmentViews[i] = textureView;
+                colorFormats[i] = Vk11Const.toVk(textureView.texture().getFormat());
+                if(attachment.clearValue().isPresent()) {
+                    Vk11Utils.putArgb(clearValues.get(i).color(), attachment.clearValue().get());
+                }
             }
-            Vk11GpuTextureView textureView = (Vk11GpuTextureView)attachment.textureView();
-            textureView.disableTransferMode(transStack, currentCommandBuffer);
-			colorTextures[i] = textureView;
-		}
+            if(hasDepth) {
+                attachmentViews[colorCount] = (Vk11GpuTextureView) depthAttachment.textureView();
+                depthFormat = Vk11Const.toVk(depthAttachment.textureView().texture().getFormat());
+                if(depthAttachment.clearValue().isPresent()) {
+                    clearValues.get(colorCount).depthStencil().depth((float) depthAttachment.clearValue().getAsDouble());
+                }
+            }
 
-		RenderPassDescriptor.Attachment<@NotNull OptionalDouble> depthAttachment = descriptor.depthAttachment();
-		this.device.instance().debug().beginDebugGroup(this.commandBuffer(), descriptor.label());
+            this.device.instance().debug().beginDebugGroup(this.commandBuffer(), descriptor.label());
 
-		int width = 0;
-		int height = 0;
-		if (!colorAttachments.isEmpty()) {
-			for (RenderPassDescriptor.Attachment<@NotNull Optional<Vector4fc>> colorAttachment : colorAttachments) {
-				if (colorAttachment != null) {
-					GpuTextureView colorTexture = colorAttachment.textureView();
-					width = colorTexture.getWidth(0);
-					height = colorTexture.getHeight(0);
-				}
-			}
-		} else if (depthAttachment != null) {
-			width = depthAttachment.textureView().getWidth(0);
-			height = depthAttachment.textureView().getHeight(0);
-		}
+            int width = 0, height = 0;
+            for(Vk11GpuTextureView view : attachmentViews) {
+                if(view == null) continue;
+                width = view.getWidth(0);
+                height = view.getHeight(0);
+                break;
+            }
 
-		try (MemoryStack stack = MemoryStack.stackPush()) {
-			// Build color formats list
-			List<Integer> colorFormats = new java.util.ArrayList<>();
-			for (Vk11GpuTextureView cv : colorTextures) {
-				if (cv != null) {
-					colorFormats.add(Vk11Const.toVk(cv.texture().getFormat()));
-				} else {
-					colorFormats.add(VK10.VK_FORMAT_UNDEFINED);
-				}
-			}
+            long renderPass = this.device.renderPassCache().getOrCreateRenderPass(colorFormats, hasDepth, depthFormat);
 
-			boolean hasDepth = depthAttachment != null;
-			int depthFormat = hasDepth ? Vk11Const.toVk(depthAttachment.textureView().texture().getFormat()) : VK10.VK_FORMAT_UNDEFINED;
+            long framebuffer = this.device.framebufferCache().getOrCreateFramebuffer(renderPass, width, height, attachmentViews);
 
-			long renderPass = this.device.renderPassCache().getOrCreateRenderPass(colorFormats, hasDepth, depthFormat);
+            // Begin render pass
+            VkRenderPassBeginInfo renderPassBeginInfo = VkRenderPassBeginInfo.calloc(memoryStack).sType$Default();
+            renderPassBeginInfo.renderPass(renderPass);
+            renderPassBeginInfo.framebuffer(framebuffer);
+            renderPassBeginInfo.renderArea().offset().set(descriptor.renderArea != null ? descriptor.renderArea.x() : 0, descriptor.renderArea != null ? descriptor.renderArea.y() : 0);
+            renderPassBeginInfo.renderArea().extent().set(width, height);
+            renderPassBeginInfo.pClearValues(clearValues);
+            renderPassBeginInfo.clearValueCount(attachmentViews.length);
 
-			// Build image views array for framebuffer
-			int viewCount = colorTextures.length + (hasDepth ? 1 : 0);
-			long[] imageViews = new long[viewCount];
-			for (int i = 0; i < colorTextures.length; i++) {
-				imageViews[i] = colorTextures[i] != null ? colorTextures[i].vkImageView() : 0L;
-			}
-			if (hasDepth) {
-				imageViews[colorTextures.length] = ((Vk11GpuTextureView)depthAttachment.textureView()).vkImageView();
-			}
+            VK10.vkCmdBeginRenderPass(this.commandBuffer(), renderPassBeginInfo, VK10.VK_SUBPASS_CONTENTS_INLINE);
 
-			long framebuffer = this.device.renderPassCache().getOrCreateFramebuffer(renderPass, width, height, imageViews);
-
-			// Build clear values
-			org.lwjgl.vulkan.VkClearValue.Buffer clearValues = VkClearValue.calloc(viewCount, stack);
-			for (int i = 0; i < colorTextures.length; i++) {
-				if (colorTextures[i] != null) {
-					RenderPassDescriptor.Attachment<@NotNull Optional<Vector4fc>> attachment = colorAttachments.get(i);
-					if (attachment.clearValue().isPresent()) {
-						Vector4fc color = attachment.clearValue().get();
-                        System.out.println("Clear value: "+color);
-						Vk11Utils.putArgb(clearValues.get(i).color(), color);
-					}
-				}
-			}
-			if (hasDepth) {
-				OptionalDouble clearDepth = depthAttachment.clearValue();
-				if (clearDepth.isPresent()) {
-					clearValues.get(colorTextures.length).depthStencil(VkClearDepthStencilValue.calloc(stack).depth((float)clearDepth.getAsDouble()));
-				}
-			}
-
-			// Begin render pass
-			org.lwjgl.vulkan.VkRenderPassBeginInfo renderPassBeginInfo = org.lwjgl.vulkan.VkRenderPassBeginInfo.calloc(stack).sType$Default();
-			renderPassBeginInfo.renderPass(renderPass);
-			renderPassBeginInfo.framebuffer(framebuffer);
-			renderPassBeginInfo.renderArea().offset().set(descriptor.renderArea != null ? descriptor.renderArea.x() : 0, descriptor.renderArea != null ? descriptor.renderArea.y() : 0);
-			renderPassBeginInfo.renderArea().extent().set(width, height);
-			renderPassBeginInfo.pClearValues(clearValues);
-			renderPassBeginInfo.clearValueCount(viewCount);
-
-			VK10.vkCmdBeginRenderPass(this.commandBuffer(), renderPassBeginInfo, VK10.VK_SUBPASS_CONTENTS_INLINE);
-		}
-
-		this.currentRenderPass = new Vk11RenderPass(
-			this.device, this, this.commandBuffer(), descriptor.renderArea, width, height, depthAttachment != null, descriptor.label()
-		);
-		return this.currentRenderPass;
-	}
+            this.currentRenderPass = new Vk11RenderPass(
+                    this.device, this, this.commandBuffer(), descriptor.renderArea, width, height, hasDepth, descriptor.label()
+            );
+            return this.currentRenderPass;
+        }
+    }
 
     private boolean poolCapacityLow() {
         for(Vk11DescriptorPool pool : descriptorPools) {
