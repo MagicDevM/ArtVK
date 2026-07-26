@@ -29,8 +29,6 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 	public static final int MAX_SUBMITS_IN_FLIGHT = 3;
 	private final Vk11Device device;
 	private final Vk11TransientMemory transientMemory;
-	private final long[] acquireSemaphores = new long[MAX_SUBMITS_IN_FLIGHT];
-	private final long[] presentSemaphores = new long[MAX_SUBMITS_IN_FLIGHT];
 	private final Vk11Fence[] frameFences = new Vk11Fence[MAX_SUBMITS_IN_FLIGHT];
 	private int currentSubmitIndex = 0;
 	private Vk11Queue.Submission submissionBuilder;
@@ -38,31 +36,11 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 	private final Vk11CommandPool[] commandPools = new Vk11CommandPool[MAX_SUBMITS_IN_FLIGHT];
 	private @Nullable VkCommandBuffer currentCommandBuffer;
 	private @Nullable Vk11RenderPass currentRenderPass;
-	private long submittedPresentSemaphore;
 	private final java.util.ArrayList<Vk11DescriptorPool> descriptorPools = new java.util.ArrayList<>();
 
 	public Vk11CommandEncoder(final Vk11Device device) {
 		this.device = device;
 		this.transientMemory = new Vk11TransientMemory(device, this);
-
-		try (MemoryStack stack = MemoryStack.stackPush()) {
-			VkSemaphoreCreateInfo semaphoreCreateInfo = VkSemaphoreCreateInfo.calloc(stack).sType$Default();
-			LongBuffer semaphoreHandlePtr = stack.callocLong(1);
-
-			for (int i = 0; i < this.acquireSemaphores.length; i++) {
-				Vk11Utils.crashIfFailure(
-                        VK10.vkCreateSemaphore(device.vkDevice(), semaphoreCreateInfo, null, semaphoreHandlePtr), "Failed to create acquire VkSemaphore"
-				);
-				this.acquireSemaphores[i] = semaphoreHandlePtr.get(0);
-			}
-
-			for (int i = 0; i < this.presentSemaphores.length; i++) {
-				Vk11Utils.crashIfFailure(
-                        VK10.vkCreateSemaphore(device.vkDevice(), semaphoreCreateInfo, null, semaphoreHandlePtr), "Failed to create present VkSemaphore"
-				);
-				this.presentSemaphores[i] = semaphoreHandlePtr.get(0);
-			}
-		}
 
 		for (int i = 0; i < MAX_SUBMITS_IN_FLIGHT; i++) {
 			this.frameFences[i] = new Vk11Fence(device, true);
@@ -85,8 +63,6 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 		for (int i = 0; i < MAX_SUBMITS_IN_FLIGHT; i++) {
 			this.commandPools[i].destroy();
 			this.frameFences[i].destroy();
-			VK10.vkDestroySemaphore(this.device.vkDevice(), this.acquireSemaphores[i], null);
-			VK10.vkDestroySemaphore(this.device.vkDevice(), this.presentSemaphores[i], null);
 		}
 	}
 
@@ -202,7 +178,6 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 	public void submit() {
 		this.endCommandBuffer();
 		this.transientMemory.endSubmit();
-		this.submittedPresentSemaphore = this.presentSemaphores[this.currentSubmitIndex];
         long lastFence = this.frameFences[this.currentSubmitIndex].vkFence();
 
         requireFencesComplete(lastFence);
@@ -635,20 +610,6 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 			);
 			return timestampPtr.get(0);
 		}
-	}
-
-	public long acquireSemaphore() {
-        assert acquireSemaphores.length == MAX_SUBMITS_IN_FLIGHT;
-		return this.acquireSemaphores[this.currentSubmitIndex];
-	}
-
-	public long presentSemaphore() {
-        assert presentSemaphores.length == MAX_SUBMITS_IN_FLIGHT;
-		return this.presentSemaphores[this.currentSubmitIndex];
-	}
-
-	public long submittedPresentSemaphore() {
-		return this.submittedPresentSemaphore;
 	}
 
 	public int currentSubmitIndex() {
