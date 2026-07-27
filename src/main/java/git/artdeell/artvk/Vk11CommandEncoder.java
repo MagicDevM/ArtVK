@@ -16,6 +16,8 @@ import java.nio.LongBuffer;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
+
+import git.artdeell.ArtVK;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import org.jetbrains.annotations.NotNull;
@@ -278,7 +280,7 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 		}
 
         if(poolCapacityLow) {
-            System.out.println("Descriptor pool capacity is low, submitting out of order");
+            ArtVK.LOGGER.warn("Descriptor pool capacity is low, submitting out of order");
             submit();
         }
 	}
