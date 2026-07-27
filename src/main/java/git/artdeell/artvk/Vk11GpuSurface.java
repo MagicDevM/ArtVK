@@ -354,8 +354,8 @@ public class Vk11GpuSurface implements GpuSurfaceBackend {
 			);
 		}
 
-		vk11CommandEncoder.waitSemaphore(acquireSemaphores[currentAcquireSemaphore], 0L, VK10.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
-        vk11CommandEncoder.signalSemaphore(presentSemaphores[currentImageIndex], 0L, VK10.VK_PIPELINE_STAGE_TRANSFER_BIT);
+		vk11CommandEncoder.waitSemaphore(acquireSemaphores[currentAcquireSemaphore], VK10.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+        vk11CommandEncoder.signalSemaphore(presentSemaphores[currentImageIndex]);
 	}
 
 	@Override

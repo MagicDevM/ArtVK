@@ -113,12 +113,12 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 		}
 	}
 
-	public void waitSemaphore(final long vkSemaphore, final long value, final int stageMask) {
+	public void waitSemaphore(final long vkSemaphore, final int stageMask) {
 		if (this.currentRenderPass != null) {
 			throw new IllegalStateException("Cannot add semaphore operation while inside RenderPass");
 		}
 
-		this.submissionBuilder.waitSemaphore(vkSemaphore, value, stageMask);
+		this.submissionBuilder.waitSemaphore(vkSemaphore, stageMask);
 	}
 
 	public void execute(final VkCommandBuffer commandBuffer) {
@@ -129,12 +129,12 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 		this.submissionBuilder.executeCommands(commandBuffer);
 	}
 
-	public void signalSemaphore(final long vkSemaphore, final long value, final long stageMask) {
+	public void signalSemaphore(final long vkSemaphore) {
 		if (this.currentRenderPass != null) {
 			throw new IllegalStateException("Cannot add semaphore operation while inside RenderPass");
 		}
 
-		this.submissionBuilder.signalSemaphore(vkSemaphore, value, stageMask);
+		this.submissionBuilder.signalSemaphore(vkSemaphore);
 	}
 
 	private void memoryBarrier(final MemoryStack stack) {
