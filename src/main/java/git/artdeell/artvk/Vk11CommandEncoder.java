@@ -29,7 +29,7 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 	public static final int MAX_SUBMITS_IN_FLIGHT = 3;
 	private final Vk11Device device;
 	private final Vk11TransientMemory transientMemory;
-	private final Vk11Fence[] frameFences = new Vk11Fence[MAX_SUBMITS_IN_FLIGHT];
+	private final Vk11Fence[] submitFences = new Vk11Fence[MAX_SUBMITS_IN_FLIGHT];
 	private int currentSubmitIndex = 0;
 	private Vk11Queue.Submission submissionBuilder;
 	private final DestructionQueue<Destroyable> destroyQueue = new DestructionQueue<>(MAX_SUBMITS_IN_FLIGHT, Destroyable::destroy);
@@ -43,7 +43,7 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 		this.transientMemory = new Vk11TransientMemory(device, this);
 
 		for (int i = 0; i < MAX_SUBMITS_IN_FLIGHT; i++) {
-			this.frameFences[i] = new Vk11Fence(device, true);
+			this.submitFences[i] = new Vk11Fence(device, true);
 			this.commandPools[i] = new Vk11CommandPool(device, device.graphicsQueue());
 		}
 
@@ -62,7 +62,7 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 
 		for (int i = 0; i < MAX_SUBMITS_IN_FLIGHT; i++) {
 			this.commandPools[i].destroy();
-			this.frameFences[i].destroy();
+			this.submitFences[i].destroy();
 		}
 	}
 
@@ -156,38 +156,20 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 		);
 	}
 
-    public boolean waitForFences(long... fences) {
-        int result = VK10.VK_TIMEOUT;
-        while(result == VK10.VK_TIMEOUT) {
-            result = VK10.vkWaitForFences(device.vkDevice(), fences, true, 1_000_000_000L);
-        }
-        Vk11Utils.crashIfFailure(result, "fence wait failed");
-        return true;
-    }
-
-    public void resetFences(long... fences) {
-        Vk11Utils.crashIfFailure(VK10.vkResetFences(device.vkDevice(), fences), "fence reset failed");
-    }
-
-    public void requireFencesComplete(long... fences) {
-        if(!waitForFences(fences)) throw new IllegalStateException("Failed to wait for completion fence");
-        resetFences(fences);
-    }
-
     @Override
 	public void submit() {
 		this.endCommandBuffer();
 		this.transientMemory.endSubmit();
-        long lastFence = this.frameFences[this.currentSubmitIndex].vkFence();
 
-        requireFencesComplete(lastFence);
+        Vk11Fence lastFence = this.submitFences[this.currentSubmitIndex];
+        lastFence.autoWait();
 
-        this.submissionBuilder.close(lastFence);
+        this.submissionBuilder.close(lastFence.vkFence());
 		this.submissionBuilder = this.device.graphicsQueue().beginSubmit();
 
         currentSubmitIndex = (currentSubmitIndex + 1) % MAX_SUBMITS_IN_FLIGHT;
 
-        waitForFences(frameFences[currentSubmitIndex].vkFence());
+        submitFences[currentSubmitIndex].waitForever();
 
         for (Vk11DescriptorPool pool : this.descriptorPools) {
             pool.resetFrame(this.currentSubmitIndex);
@@ -571,17 +553,7 @@ public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
 
 	@Override
 	public @NotNull GpuFence createFence() {
-        return new GpuFence() {
-            // Don't gaf
-            // Maybe TODO: implement fence for previous frame's submit
-            @Override
-            public void close() {}
-
-            @Override
-            public boolean awaitCompletion(long timeoutNS) {
-                return true;
-            }
-        };
+        return submitFences[currentSubmitIndex];
 	}
 
 	@Override
