@@ -81,7 +81,7 @@ public class Vk11TransientMemory implements TransientMemory, Destroyable {
 				}
 			}
 
-			this.useDeviceMemoryForMappedGpuStaging = largestHeapIsHostVisibleAndCoherent;
+			this.useDeviceMemoryForMappedGpuStaging = false;
 		}
 
 		this.stagingBlockAllocator = new TransientBlockAllocator<>(

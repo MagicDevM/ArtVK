@@ -10,9 +10,9 @@ import org.lwjgl.vulkan.VkDescriptorPoolSize.Buffer;
 
 @Environment(EnvType.CLIENT)
 public class Vk11DescriptorPool implements Destroyable {
-	public static final int SETS_PER_FRAME = 1512;
-    public static final int SET_PREALLOCATE_COUNT = 504;
-    public static final int RECLAIM_THRESHOLD = 504;
+	public static final int SETS_PER_FRAME = 256;
+    public static final int SET_PREALLOCATE_COUNT = 128;
+    public static final int RECLAIM_THRESHOLD = 128;
 
 	private final Vk11Device device;
     private final PoolObject[] pools = new PoolObject[Vk11CommandEncoder.MAX_SUBMITS_IN_FLIGHT];

@@ -1,5 +1,6 @@
 package git.artdeell.artvk;
 
+import git.artdeell.ArtVK;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
@@ -86,7 +87,20 @@ public record Vk11Queue(VkQueue vkQueue, int queueFamilyIndex) {
 				cbPtr.flip();
 				submitInfo.pCommandBuffers(cbPtr);
 
-				int result = VK10.vkQueueSubmit(vkQueue, submitInfo, fence);
+        VmaBudget.Buffer budgets = VmaBudget.calloc(heapCount);
+    
+        Vma.vmaGetHeapBudgets(vmaAllocator, budgets);
+    
+        for (int i = 0; i < heapCount; i++) {
+            ArtVK.LOGGER.info(
+                "Heap {} usage={}MB budget={}MB",
+                i,
+                budgets.get(i).usage()/1024/1024,
+                budgets.get(i).budget()/1024/1024
+            );
+        }
+
+        int result = VK10.vkQueueSubmit(vkQueue, submitInfo, fence);
 				if (result < 0) {
 					throw new IllegalStateException("Failed to submit VkCommandBuffer: " + Vk11Utils.resultToString(result));
 				}

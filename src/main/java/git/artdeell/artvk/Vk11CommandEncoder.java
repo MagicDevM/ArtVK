@@ -28,7 +28,7 @@ import org.lwjgl.vulkan.*;
 
 @Environment(EnvType.CLIENT)
 public class Vk11CommandEncoder implements CommandEncoderBackend, Destroyable {
-	public static final int MAX_SUBMITS_IN_FLIGHT = 3;
+	public static final int MAX_SUBMITS_IN_FLIGHT = 1;
 	private final Vk11Device device;
 	private final Vk11TransientMemory transientMemory;
 	private final Vk11Fence[] submitFences = new Vk11Fence[MAX_SUBMITS_IN_FLIGHT];
